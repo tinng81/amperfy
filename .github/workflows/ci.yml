@@ -1,0 +1,83 @@
+name: "Build Unsigned 🔨"
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: "Build Unsigned 🔨"
+    if: github.event.pull_request.draft == false
+    # We still need the environment to access the Profile Secret for the artifact
+    environment: Production
+    runs-on: macos-15
+
+    steps:    
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Fetch Commit Info
+        id: commitinfo
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      
+      - name: Install SwiftGen
+        run: brew install swiftgen
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # 1. Prepare Provisioning Profile (For Artifact only, not for building)
+      - name: Prepare Profile
+        env:
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          # Decode the profile so we can upload it for local signing
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "Amperfy.mobileprovision"
+
+      # 2. Patch Project (Remove Hostile Team ID)
+      - name: Patch Project File
+        run: |
+          sed -i '' "s/DEVELOPMENT_TEAM = [A-Z0-9]*;//g" Amperfy.xcodeproj/project.pbxproj
+          
+          # Force the Bundle ID to yours (for compilation consistency)
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = com.winng.amperfy-music;/g" Amperfy.xcodeproj/project.pbxproj
+          
+          echo "✅ Removed hardcoded Team IDs to allow unsigned build."
+
+      # 3. Build Unsigned
+      - name: Build Unsigned Archive
+        run: |
+          xcodebuild -project "Amperfy.xcodeproj" \
+          -scheme "Amperfy" \
+          -clonedSourcePackagesDirPath PackageCache \
+          -configuration Release \
+          -destination "generic/platform=iOS" \
+          archive \
+          -archivePath "build/Amperfy.xcarchive" \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+
+      # 4. Package IPA Manually
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/Amperfy.xcarchive/Products/Applications/Amperfy.app" build/Payload/
+          cd build
+          zip -r "Amperfy.unsigned.ipa" Payload
+
+      # 5. Upload Everything Needed for Local Signing
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Amperfy-ReadyToSign
+          path: |
+            build/Amperfy.unsigned.ipa
+            Amperfy.mobileprovision
+            Amperfy/Amperfy.entitlements
+          retention-days: 1
