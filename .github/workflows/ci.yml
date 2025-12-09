@@ -61,7 +61,8 @@ jobs:
           -archivePath "build/Amperfy.xcarchive" \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES
 
       # 4. Package IPA Manually
       - name: Package IPA
